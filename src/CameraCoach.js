@@ -21,14 +21,29 @@ function fileToGenerativePart(base64, mimeType) {
   };
 }
 
+// [新增] 创建一个独立的图片保存函数
+const saveImageToLocal = (imageSrc) => {
+  if (!imageSrc) return;
+
+  // 创建一个a标签并模拟点击来下载图片
+  const link = document.createElement('a');
+  link.href = imageSrc;
+  // 使用时间戳命名文件，确保唯一性
+  link.download = `photo-coach-${new Date().getTime()}.jpeg`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+
 function CameraCoach() {
   const webcamRef = useRef(null);
   const [aiFeedback, setAiFeedback] = useState('请将镜头对准拍摄对象，然后点击“获取建议”');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // 核心功能：捕获图像并调用API，现在由按钮手动触发
-  const handleAnalyzeImage = useCallback(async () => {
-    if (isProcessing) return; // 防止在处理过程中重复点击
+  // [修改] 核心功能：捕获、保存并调用API
+  const handleAnalyzeAndSaveImage = useCallback(async () => {
+    if (isProcessing) return; 
 
     const imageSrc = webcamRef.current.getScreenshot();
     if (!imageSrc) {
@@ -36,6 +51,12 @@ function CameraCoach() {
       return;
     }
 
+    // --- 新增的核心逻辑 ---
+    // 步骤1：立即保存图片到本地
+    saveImageToLocal(imageSrc);
+    // --- 结束 ---
+
+    // 步骤2：继续执行AI分析
     setIsProcessing(true);
     setAiFeedback('正在分析图片...');
 
@@ -49,25 +70,9 @@ function CameraCoach() {
       console.error("Error analyzing image:", error);
       setAiFeedback('AI分析失败，请检查API Key或网络连接。');
     } finally {
-      setIsProcessing(false); // 请求结束后，允许再次点击
+      setIsProcessing(false); 
     }
-  }, [isProcessing]); // 依赖isProcessing以获取最新状态
-
-  // ** [修改] ** 定时器相关的 useEffect 已被移除
-
-  // 用户手动拍照
-  const handleCapture = () => {
-    const imageSrc = webcamRef.current.getScreenshot();
-    if (!imageSrc) return;
-
-    // 创建一个链接并模拟点击来下载图片
-    const link = document.createElement('a');
-    link.href = imageSrc;
-    link.download = `capture-${new Date().getTime()}.jpeg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  }, [isProcessing]); 
 
   return (
     <div style={styles.container}>
@@ -76,7 +81,7 @@ function CameraCoach() {
         ref={webcamRef}
         screenshotFormat="image/jpeg"
         style={styles.webcam}
-        videoConstraints={{ facingMode: "environment" }} // 优先使用后置摄像头
+        videoConstraints={{ facingMode: "environment" }} 
       />
       <div style={styles.overlayContainer}>
         {/* 顶部AI反馈区域 */}
@@ -84,20 +89,14 @@ function CameraCoach() {
           <p style={styles.feedbackText}>{aiFeedback}</p>
         </div>
 
-        {/* ** [修改] ** 底部按钮容器 */}
+        {/* [修改] 底部按钮现在只有一个 */}
         <div style={styles.bottomControls}>
-          {/* 新增的“获取建议”按钮 */}
           <button 
-            onClick={handleAnalyzeImage} 
-            disabled={isProcessing} // 处理中时禁用按钮
-            style={isProcessing ? {...styles.controlButton, ...styles.disabledButton} : styles.controlButton}
+            onClick={handleAnalyzeAndSaveImage} 
+            disabled={isProcessing}
+            style={isProcessing ? {...styles.captureButton, ...styles.disabledButton} : styles.captureButton}
           >
-            {isProcessing ? '分析中...' : '获取建议'}
-          </button>
-
-          {/* 原有的拍照按钮 */}
-          <button onClick={handleCapture} style={styles.captureButton}>
-            拍照
+            {isProcessing ? '...' : '拍摄并获取建议'}
           </button>
         </div>
       </div>
@@ -105,74 +104,26 @@ function CameraCoach() {
   );
 }
 
-// --- 样式区 (有更新) ---
+// --- 样式区 (有少量修改) ---
 const styles = {
-  container: {
-    position: 'relative',
-    width: '100vw',
-    height: '100vh',
-    backgroundColor: '#000',
-  },
-  webcam: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-  },
+  container: { position: 'relative', width: '100vw', height: '100vh', backgroundColor: '#000' },
+  webcam: { width: '100%', height: '100%', objectFit: 'cover' },
   overlayContainer: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '20px',
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', padding: '20px',
   },
   feedbackBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: '10px',
-    padding: '10px 15px',
-    maxWidth: '90%',
-    marginTop: '20px',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)', borderRadius: '10px', padding: '10px 15px', maxWidth: '90%', marginTop: '20px',
   },
-  feedbackText: {
-    color: 'white',
-    fontSize: '16px',
-    margin: 0,
+  feedbackText: { color: 'white', fontSize: '16px', margin: 0 },
+  bottomControls: { display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', paddingBottom: '30px' },
+  captureButton: { // 复用拍照按钮的样式
+    width: '100px', height: '100px', borderRadius: '50%',
+    border: '4px solid white', backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    cursor: 'pointer', fontSize: '18px', color: 'white', fontWeight: 'bold',
+    display: 'flex', justifyContent: 'center', alignItems: 'center',
   },
-  // ** [新增] ** 底部按钮容器样式
-  bottomControls: {
-    display: 'flex',
-    justifyContent: 'space-around', // 让按钮均匀分布
-    alignItems: 'center',
-    width: '100%',
-    maxWidth: '400px', // 限制最大宽度
-  },
-  // ** [新增] ** 普通控制按钮样式
-  controlButton: {
-    backgroundColor: '#007AFF', // 蓝色背景
-    color: 'white',
-    border: 'none',
-    borderRadius: '20px',
-    padding: '12px 24px',
-    fontSize: '16px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-  },
-  // ** [新增] ** 禁用状态的样式
-  disabledButton: {
-    backgroundColor: '#555',
-    cursor: 'not-allowed',
-  },
-  captureButton: {
-    width: '70px',
-    height: '70px',
-    borderRadius: '50%',
-    border: '4px solid white',
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    cursor: 'pointer',
-    fontSize: '18px',
-    color: 'black',
-  },
+  disabledButton: { opacity: 0.6, cursor: 'not-allowed' },
 };
 
 export default CameraCoach;
