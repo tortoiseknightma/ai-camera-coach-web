@@ -1,14 +1,14 @@
 {
   "files": {
     "main.css": "/ai-camera-coach-web/static/css/main.f855e6bc.css",
-    "main.js": "/ai-camera-coach-web/static/js/main.63aa9573.js",
+    "main.js": "/ai-camera-coach-web/static/js/main.7379c833.js",
     "service-worker.js": "/ai-camera-coach-web/service-worker.js",
     "index.html": "/ai-camera-coach-web/index.html",
     "main.f855e6bc.css.map": "/ai-camera-coach-web/static/css/main.f855e6bc.css.map",
-    "main.63aa9573.js.map": "/ai-camera-coach-web/static/js/main.63aa9573.js.map"
+    "main.7379c833.js.map": "/ai-camera-coach-web/static/js/main.7379c833.js.map"
   },
   "entrypoints": [
     "static/css/main.f855e6bc.css",
-    "static/js/main.63aa9573.js"
+    "static/js/main.7379c833.js"
   ]
 }
