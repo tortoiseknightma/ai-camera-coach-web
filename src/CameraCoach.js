@@ -1,7 +1,7 @@
 // src/CameraCoach.js
 import React, { useRef, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI  } from '@google/genai';
 import packageJson from '../package.json';
 
 // --- 配置区 ---
@@ -9,7 +9,7 @@ const API_KEY = 'AIzaSyB-yqkHhnY201EBFpmzamtmzwjVsT2VZ1k'; // !! 替换成你的
 const PROMPT = "You are a camera assistant. For the given photo, do the following:\n Step 1: Classify the user's photo intent. Choose ONE or TWO intents from this list: [Portrait, Social, Food, Landscape, Architecture, Object].\n Step 2: Identify ONE or TWO short issues in the photo composition, focusing on subject placement, balance, clutter, or perspective.\n Step 3: Suggest ONE or TWO concrete camera adjustments only from this list: [Pan left, Pan right, Tilt up, Tilt down, Zoom in, Zoom out, Shift left, Shift right, Shift up, Shift down, Move forward, Move backward].\n Format as:\n Intent: [Option] or [Option1, Option2]. Do NOT explain. Do NOT add extra text.\n Diagnosis: [Issue] or [Issue1, Issue2]. Keep them concise, like bullet points.\n Adjustment: [Adjustment] or [Adjustment1, Adjustment2]. Always choose one clear option or a valid non-contradictory combination.";// ---
 
 // ... (其他函数如 genAI, model, fileToGenerativePart, saveImageToLocal 保持不变) ...
-const genAI = new GoogleGenerativeAI(API_KEY);
+const genAI = new GoogleGenAI (API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
 function fileToGenerativePart(base64, mimeType) {
