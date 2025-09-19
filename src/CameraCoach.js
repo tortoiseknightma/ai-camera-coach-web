@@ -2,7 +2,7 @@
 import React, { useRef, useState, useCallback } from 'react';
 import Webcam from 'react-webcam';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { version } from '../package.json';
+import packageJson from '../package.json';
 
 // --- 配置区 ---
 const API_KEY = 'AIzaSyB-yqkHhnY201EBFpmzamtmzwjVsT2VZ1k'; // !! 替换成你的API Key
@@ -10,7 +10,7 @@ const PROMPT = "You are a camera assistant. For the given photo, do the followin
 
 // ... (其他函数如 genAI, model, fileToGenerativePart, saveImageToLocal 保持不变) ...
 const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
 function fileToGenerativePart(base64, mimeType) {
   return {
@@ -100,7 +100,7 @@ function CameraCoach() {
 
       {/* --- [新增] 版本号显示 --- */}
       <div style={styles.versionNumber}>
-        v{version}
+        v{packageJson.version}
       </div>
       {/* --- 结束 --- */}
 
