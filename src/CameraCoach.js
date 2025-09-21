@@ -111,8 +111,30 @@ function CameraCoach() {
       setAiFeedback(responseText);
 
     } catch (error) {
-      console.error(`Error with ${currentLLM.toUpperCase()} API:`, error);
-      setAiFeedback(`调用 ${currentLLM.toUpperCase()} API 失败，请检查配置或网络。`);
+      // --- 核心改动在这里 ---
+      console.error("【AI分析失败】详细错误信息:", error); // 开发者看的详细日志
+
+      // [修改] 创建一个对用户更友好的消息变量
+      let userFriendlyMessage = '发生未知错误，请稍后再试。';
+
+      if (error instanceof Error) {
+        const errorMessage = error.message.toLowerCase();
+        
+        if (errorMessage.includes("api key not valid") || errorMessage.includes("[400]")) {
+          userFriendlyMessage = 'AI分析失败：API Key 无效，请检查您的 Key 是否正确配置。';
+        } else if (errorMessage.includes("permission denied") || errorMessage.includes("[403]")) {
+          userFriendlyMessage = 'AI分析失败：API 权限不足。请确保您已在 Google Cloud 项目中启用了所需的 API 服务。';
+        } else if (errorMessage.includes("rate limit") || errorMessage.includes("[429]")) {
+          userFriendlyMessage = '请求过于频繁，已超出速率限制，请稍等一分钟再试。';
+        } else if (errorMessage.includes("content was blocked")) {
+          userFriendlyMessage = '分析被拒绝：图片或提示词可能因安全策略被拦截。请尝试更换图片。';
+        } else if (errorMessage.includes("[500]") || errorMessage.includes("[503]")) {
+          userFriendlyMessage = 'AI 服务端出现临时问题 (错误码 5xx)，请稍后再试。';
+        }
+      }
+      
+      setAiFeedback(userFriendlyMessage); // 更新UI，显示更具体的错误信息
+      // --- 核心改动结束 ---
     } finally {
       setIsProcessing(false); 
     }
