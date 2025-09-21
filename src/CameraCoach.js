@@ -16,7 +16,7 @@ const ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 
 // --- SDK 初始化 ---
 const geminiAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const geminiModel = geminiAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const geminiModel = geminiAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
 const arkClient = new OpenAI({
   apiKey: ARK_API_KEY,
@@ -50,6 +50,7 @@ function CameraCoach() {
   const [aiFeedback, setAiFeedback] = useState('请选择模型并开始...');
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentLLM, setCurrentLLM] = useState('gemini');
+  const [analyzedImage, setAnalyzedImage] = useState(null);
 
   const toggleLLM = () => {
     setCurrentLLM(prevLLM => {
@@ -59,19 +60,18 @@ function CameraCoach() {
     });
   };
 
-  // [重构] 核心的AI分析函数
   const getAiFeedback = async (imageSrc) => {
+    setAnalyzedImage(imageSrc);
+    
     setIsProcessing(true);
     setAiFeedback(`正在使用 ${currentLLM.toUpperCase()} 分析图片...`);
 
     try {
       let responseText = '';
-      
       if (currentLLM === 'gemini') {
         const imagePart = fileToGenerativePart(imageSrc, "image/jpeg");
         const result = await geminiModel.generateContent([GEMINI_PROMPT, imagePart]);
-        const response = await result.response;
-        responseText = response.text();
+        responseText = result.response.text();
       } else if (currentLLM === 'ark') {
         const response = await arkClient.chat.completions.create({
           model: ARK_MODEL_ID,
@@ -80,7 +80,12 @@ function CameraCoach() {
               role: 'user',
               content: [
                 { type: 'text', text: GEMINI_PROMPT },
-                { type: 'image_url', url: imageSrc },
+                { 
+                  type: 'image_url',
+                  image_url: {
+                    url: imageSrc,
+                  },
+                },
               ],
             },
           ],
@@ -91,12 +96,12 @@ function CameraCoach() {
     } catch (error) {
       console.error(`Error with ${currentLLM.toUpperCase()} API:`, error);
       setAiFeedback(`调用 ${currentLLM.toUpperCase()} API 失败，请检查配置或网络。`);
+      setAnalyzedImage(null); 
     } finally {
       setIsProcessing(false); 
     }
   };
 
-  // [修改] “建议并保存” 按钮的处理函数
   const handleAnalyzeAndSaveImage = useCallback(async () => {
     if (isProcessing) return;
     const imageSrc = webcamRef.current.getScreenshot();
@@ -104,13 +109,10 @@ function CameraCoach() {
       setAiFeedback('无法捕获图像，请重试。');
       return;
     }
-    // 步骤1: 保存图片
     saveImageToLocal(imageSrc);
-    // 步骤2: 调用核心分析函数
     getAiFeedback(imageSrc);
-  }, [isProcessing, currentLLM]); // 依赖中加入 currentLLM
+  }, [isProcessing, currentLLM]);
 
-  // [新增] “仅获取建议” 按钮的处理函数
   const handleAnalyzeOnly = useCallback(async () => {
     if (isProcessing) return;
     const imageSrc = webcamRef.current.getScreenshot();
@@ -118,9 +120,8 @@ function CameraCoach() {
       setAiFeedback('无法捕获图像，请重试。');
       return;
     }
-    // 直接调用核心分析函数，不保存
     getAiFeedback(imageSrc);
-  }, [isProcessing, currentLLM]); // 依赖中加入 currentLLM
+  }, [isProcessing, currentLLM]);
 
 
   return (
@@ -137,22 +138,28 @@ function CameraCoach() {
           <p style={styles.feedbackText}>{aiFeedback}</p>
         </div>
         
+        {analyzedImage && (
+          <div style={styles.floatingImageContainer}>
+            <img src={analyzedImage} alt="Analyzed frame" style={styles.analyzedImagePreview} />
+            <button onClick={() => setAnalyzedImage(null)} style={styles.closeButton}>
+              &times;
+            </button>
+          </div>
+        )}
+
         <div style={styles.bottomControls}>
-          {/* 模型切换按钮 */}
           <button onClick={toggleLLM} style={styles.toggleButton}>
             模型: {currentLLM.toUpperCase()}
           </button>
           
-          {/* 主操作按钮（建议并保存） */}
           <button 
             onClick={handleAnalyzeAndSaveImage} 
             disabled={isProcessing}
             style={isProcessing ? {...styles.captureButton, ...styles.disabledButton} : styles.captureButton}
           >
-            {isProcessing ? '...' : '拍摄并建议'}
+            {isProcessing ? '...' : '建议并保存'}
           </button>
 
-          {/* [新增] “仅获取建议”按钮 */}
           <button 
             onClick={handleAnalyzeOnly}
             disabled={isProcessing}
@@ -168,37 +175,127 @@ function CameraCoach() {
 
 // --- 样式区 ---
 const styles = {
-  container: { position: 'relative', width: '100vw', height: '100vh', backgroundColor: '#000' },
-  webcam: { width: '100%', height: '100%', objectFit: 'cover' },
+  container: { 
+    position: 'relative', 
+    width: '100vw', 
+    height: '100vh', 
+    backgroundColor: '#000' 
+  },
+  webcam: { 
+    width: '100%', 
+    height: '100%', 
+    objectFit: 'cover' 
+  },
   overlayContainer: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', padding: '20px',
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0,
+    display: 'flex', 
+    flexDirection: 'column', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    padding: '20px',
+    pointerEvents: 'none',
   },
   feedbackBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)', borderRadius: '10px', padding: '10px 15px', maxWidth: '90%', marginTop: '20px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
+    borderRadius: '10px', 
+    padding: '10px 15px', 
+    maxWidth: '90%', 
+    marginTop: '20px', 
+    pointerEvents: 'auto',
   },
-  feedbackText: { color: 'white', fontSize: '16px', margin: 0, whiteSpace: 'pre-wrap' },
+  feedbackText: { 
+    color: 'white', 
+    fontSize: '16px', 
+    margin: 0, 
+    whiteSpace: 'pre-wrap' 
+  },
   bottomControls: { 
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
-    width: '100%', maxWidth: '450px', paddingBottom: '30px' 
+    display: 'flex', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    width: '100%', 
+    maxWidth: '450px', 
+    paddingBottom: '30px', 
+    pointerEvents: 'auto',
   },
   captureButton: {
-    width: '100px', height: '100px', borderRadius: '50%', border: '4px solid white', 
-    backgroundColor: 'rgba(255, 255, 255, 0.3)', cursor: 'pointer', fontSize: '16px', 
-    color: 'white', fontWeight: 'bold', display: 'flex', justifyContent: 'center', 
-    alignItems: 'center', textAlign: 'center', order: 2 // flexbox 顺序，让它在中间
+    width: '100px', 
+    height: '100px', 
+    borderRadius: '50%', 
+    border: '4px solid white', 
+    backgroundColor: 'rgba(255, 255, 255, 0.3)', 
+    cursor: 'pointer', 
+    fontSize: '16px', 
+    color: 'white', 
+    fontWeight: 'bold', 
+    display: 'flex', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    textAlign: 'center', 
+    order: 2 
   },
-  disabledButton: { opacity: 0.6, cursor: 'not-allowed' },
+  disabledButton: { 
+    opacity: 0.6, 
+    cursor: 'not-allowed' 
+  },
   toggleButton: {
-    backgroundColor: '#007AFF', color: 'white', border: 'none',
-    borderRadius: '20px', padding: '10px 15px', fontSize: '14px',
-    cursor: 'pointer', fontWeight: 'bold', order: 1 // flexbox 顺序，让它在左边
+    backgroundColor: '#007AFF', 
+    color: 'white', 
+    border: 'none',
+    borderRadius: '20px', 
+    padding: '10px 15px', 
+    fontSize: '14px',
+    cursor: 'pointer', 
+    fontWeight: 'bold', 
+    order: 1 
   },
-  // [新增] 新按钮的样式
   secondaryButton: {
-    backgroundColor: 'rgba(128, 128, 128, 0.5)', color: 'white', border: '1px solid white',
-    borderRadius: '20px', padding: '10px 15px', fontSize: '14px',
-    cursor: 'pointer', fontWeight: 'bold', order: 3 // flexbox 顺序，让它在右边
+    backgroundColor: 'rgba(128, 128, 128, 0.5)', 
+    color: 'white', 
+    border: '1px solid white',
+    borderRadius: '20px', 
+    padding: '10px 15px', 
+    fontSize: '14px',
+    cursor: 'pointer', 
+    fontWeight: 'bold', 
+    order: 3 
+  },
+  floatingImageContainer: {
+    position: 'absolute',
+    top: '20px',
+    left: '20px',
+    width: '120px',
+    height: 'auto',
+    border: '2px solid white',
+    borderRadius: '8px',
+    boxShadow: '0 4px 8px rgba(0,0,0,0.5)',
+    overflow: 'hidden',
+    pointerEvents: 'auto',
+    zIndex: 10,
+  },
+  analyzedImagePreview: {
+    width: '100%',
+    height: '100%',
+    display: 'block',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: '0px',
+    right: '0px',
+    width: '24px',
+    height: '24px',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0 0 0 8px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    lineHeight: '24px',
+    textAlign: 'center',
   }
 };
 
