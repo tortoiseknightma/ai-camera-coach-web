@@ -4,6 +4,35 @@ import Webcam from 'react-webcam';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai'; // [新增] 导入OpenAI库
 
+const content = {
+  en: {
+    // UI 文本
+    initialFeedback: 'Please select a model and start...',
+    switchModel: 'Model',
+    switchLanguage: 'Language: EN',
+    getAdviceAndSave: 'Advice & Save',
+    getAdviceOnly: 'Get Advice',
+    processing: 'Analyzing...',
+    captureError: 'Failed to capture image. Please try again.',
+    feedbackError: (model) => `Failed to call ${model} API. Please check configuration or network.`,
+    // 大模型 Prompt
+    prompt: "You are a camera assistant. For the given photo, do the following:\n Step 1: Classify the user's photo intent. Choose ONE or TWO intents from this list: [Portrait, Social, Food, Landscape, Architecture, Object].\n Step 2: Identify ONE or TWO short issues in the photo composition, focusing on subject placement, balance, clutter, or perspective.\n Step 3: Suggest ONE or TWO concrete camera adjustments only from this list: [Pan left, Pan right, Tilt up, Tilt down, Zoom in, Zoom out, Shift left, Shift right, Shift up, Shift down, Move forward, Move backward].\n Format as:\n Intent: [Option] or [Option1, Option2]. Do NOT explain. Do NOT add extra text.\n Diagnosis: [Issue] or [Issue1, Issue2]. Keep them concise, like bullet points.\n Adjustment: [Adjustment] or [Adjustment1, Adjustment2]. Always choose one clear option or a valid non-contradictory combination."
+  },
+  zh: {
+    // UI 文本
+    initialFeedback: '请选择模型并开始...',
+    switchModel: '模型',
+    switchLanguage: '语言: ZH',
+    getAdviceAndSave: '建议并保存',
+    getAdviceOnly: '获取建议',
+    processing: '分析中...',
+    captureError: '无法捕获图像，请重试。',
+    feedbackError: (model) => `调用 ${model} API 失败，请检查配置或网络。`,
+    // 大模型 Prompt
+    prompt: "你是一位摄影助手。针对给定的照片，请完成以下步骤：\n步骤1：对用户的拍照意图进行分类。从此列表选择一个或两个意图：[人像, 社交, 食物, 风景, 建筑, 物体]。\n步骤2：指出照片构图中的一到两个简短问题，重点关注主体位置、平衡、杂乱或视角。\n步骤3：仅从此列表建议一到两个具体的相机调整：[向左平移, 向右平移, 向上倾斜, 向下倾斜, 放大, 缩小, 向左平移相机, 向右平移相机, 向上平移相机, 向下平移相机, 向前移动, 向后移动]。\n格式要求：\n意图：[选项] 或 [选项1, 选项2]。不要解释。不要添加额外文字。\n诊断：[问题] 或 [问题1, 问题2]。保持简洁，类似要点。\n调整：[调整] 或 [调整1, 调整2]。总是选择一个明确的选项或一个有效的、不矛盾的组合。"
+  }
+};
+
 
 // --- 配置区 ---
 const GEMINI_API_KEY = 'AIzaSyB-yqkHhnY201EBFpmzamtmzwjVsT2VZ1k'; // !! 替换成你的API Key
@@ -15,15 +44,13 @@ const ARK_MODEL_ID = 'doubao-seed-1-6-flash-250828'; // !! 替换成你的 Ark �
 const ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 
 // --- SDK 初始化 ---
-// 初始化 Gemini
 const geminiAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const geminiModel = geminiAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' }); // 使用有效的模型名称
+const geminiModel = geminiAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
-// [新增] 初始化 Ark Client
 const arkClient = new OpenAI({
   apiKey: ARK_API_KEY,
   baseURL: ARK_BASE_URL,
-  dangerouslyAllowBrowser: true, // !! 重要：在浏览器端使用时必须添加此项
+  dangerouslyAllowBrowser: true,
 });
 
 // --- 工具函数 ---
@@ -49,12 +76,18 @@ const saveImageToLocal = (imageSrc) => {
 
 function CameraCoach() {
   const webcamRef = useRef(null);
-  const [aiFeedback, setAiFeedback] = useState('请选择模型并开始...');
+  // [修改] 增加语言 state
+  const [language, setLanguage] = useState('zh'); // 'en' 或 'zh', 默认为中文
+  const [aiFeedback, setAiFeedback] = useState(content[language].initialFeedback);
   const [isProcessing, setIsProcessing] = useState(false);
-  // [新增] 用于追踪当前模型的 State
-  const [currentLLM, setCurrentLLM] = useState('gemini'); // 'gemini' 或 'ark'
+  const [currentLLM, setCurrentLLM] = useState('ark');
+  const [analyzedImage, setAnalyzedImage] = useState(null);
 
-  // [新增] 切换模型的函数
+  // [新增] 切换语言的函数
+  const toggleLanguage = () => {
+    setLanguage(prevLang => (prevLang === 'en' ? 'zh' : 'en'));
+  };
+
   const toggleLLM = () => {
     setCurrentLLM(prevLLM => {
       const newLLM = prevLLM === 'gemini' ? 'ark' : 'gemini';
@@ -63,82 +96,57 @@ function CameraCoach() {
     });
   };
 
-  const handleAnalyzeAndSaveImage = useCallback(async () => {
-    if (isProcessing) return; 
+  const getAiFeedback = async (imageSrc) => {
+    setAnalyzedImage(imageSrc);
+    setIsProcessing(true);
+    setAiFeedback(`${content[language].processing} (${currentLLM.toUpperCase()})`);
 
+    try {
+      let responseText = '';
+      const currentPrompt = content[language].prompt; // 根据当前语言选择 prompt
+
+      if (currentLLM === 'gemini') {
+        const imagePart = fileToGenerativePart(imageSrc, "image/jpeg");
+        const result = await geminiModel.generateContent([currentPrompt, imagePart]);
+        responseText = result.response.text();
+      } else if (currentLLM === 'ark') {
+        const response = await arkClient.chat.completions.create({
+          model: ARK_MODEL_ID,
+          messages: [{ role: 'user', content: [{ type: 'text', text: currentPrompt }, { type: 'image_url', image_url: { url: imageSrc } }] }],
+        });
+        responseText = response.choices[0].message.content;
+      }
+      setAiFeedback(responseText);
+    } catch (error) {
+      console.error(`Error with ${currentLLM.toUpperCase()} API:`, error);
+      setAiFeedback(content[language].feedbackError(currentLLM.toUpperCase()));
+      setAnalyzedImage(null); 
+    } finally {
+      setIsProcessing(false); 
+    }
+  };
+
+  const handleAnalyzeAndSaveImage = useCallback(async () => {
+    if (isProcessing) return;
     const imageSrc = webcamRef.current.getScreenshot();
     if (!imageSrc) {
       setAiFeedback('无法捕获图像，请重试。');
       return;
     }
     saveImageToLocal(imageSrc);
+    getAiFeedback(imageSrc);
+  }, [isProcessing, currentLLM, language]);
 
-    setIsProcessing(true);
-    setAiFeedback(`正在使用 ${currentLLM.toUpperCase()} 分析图片...`);
-
-    try {
-      let responseText = '';
-      
-      // [修改] 根据当前模型执行不同的API调用
-      if (currentLLM === 'gemini') {
-        const imagePart = fileToGenerativePart(imageSrc, "image/jpeg");
-        const result = await geminiModel.generateContent([GEMINI_PROMPT, imagePart]);
-        const response = await result.response;
-        responseText = response.text();
-
-      } else if (currentLLM === 'ark') {
-        const response = await arkClient.chat.completions.create({
-          model: ARK_MODEL_ID,
-          apikey: ARK_API_KEY,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: GEMINI_PROMPT }, // 同样使用之前的Prompt
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: imageSrc, // OpenAI SDK可以直接使用base64 data URL
-                  },
-                },
-              ],
-            },
-          ],
-        });
-        responseText = response.choices[0].message.content;
-      }
-
-      setAiFeedback(responseText);
-
-    } catch (error) {
-      // --- 核心改动在这里 ---
-      console.error("【AI分析失败】详细错误信息:", error); // 开发者看的详细日志
-
-      // [修改] 创建一个对用户更友好的消息变量
-      let userFriendlyMessage = '发生未知错误，请稍后再试。';
-
-      if (error instanceof Error) {
-        const errorMessage = error.message.toLowerCase();
-        
-        if (errorMessage.includes("api key not valid") || errorMessage.includes("[400]")) {
-          userFriendlyMessage = 'AI分析失败：API Key 无效，请检查您的 Key 是否正确配置。';
-        } else if (errorMessage.includes("permission denied") || errorMessage.includes("[403]")) {
-          userFriendlyMessage = 'AI分析失败：API 权限不足。请确保您已在 Google Cloud 项目中启用了所需的 API 服务。';
-        } else if (errorMessage.includes("rate limit") || errorMessage.includes("[429]")) {
-          userFriendlyMessage = '请求过于频繁，已超出速率限制，请稍等一分钟再试。';
-        } else if (errorMessage.includes("content was blocked")) {
-          userFriendlyMessage = '分析被拒绝：图片或提示词可能因安全策略被拦截。请尝试更换图片。';
-        } else if (errorMessage.includes("[500]") || errorMessage.includes("[503]")) {
-          userFriendlyMessage = 'AI 服务端出现临时问题 (错误码 5xx)，请稍后再试。';
-        }
-      }
-      
-      setAiFeedback(userFriendlyMessage); // 更新UI，显示更具体的错误信息
-      // --- 核心改动结束 ---
-    } finally {
-      setIsProcessing(false); 
+  const handleAnalyzeOnly = useCallback(async () => {
+    if (isProcessing) return;
+    const imageSrc = webcamRef.current.getScreenshot();
+    if (!imageSrc) {
+      setAiFeedback('无法捕获图像，请重试。');
+      return;
     }
-  }, [isProcessing, currentLLM]); // 依赖中加入 currentLLM
+    getAiFeedback(imageSrc);
+  }, [isProcessing, currentLLM, language]);
+
 
   return (
     <div style={styles.container}>
@@ -154,10 +162,23 @@ function CameraCoach() {
           <p style={styles.feedbackText}>{aiFeedback}</p>
         </div>
         
+        {analyzedImage && (
+          <div style={styles.floatingImageContainer}>
+            <img src={analyzedImage} alt="Analyzed frame" style={styles.analyzedImagePreview} />
+            <button onClick={() => setAnalyzedImage(null)} style={styles.closeButton}>
+              &times;
+            </button>
+          </div>
+        )}
+
+        {/* [修改] 底部按钮区的文本现在是动态的 */}
         <div style={styles.bottomControls}>
-          {/* [新增] 模型切换按钮 */}
-          <button onClick={toggleLLM} style={styles.toggleButton}>
-            切换模型 ({currentLLM.toUpperCase()})
+          <button onClick={toggleLanguage} style={styles.utilityButton}>
+            {content[language].switchLanguage}
+          </button>
+          
+          <button onClick={toggleLLM} style={styles.utilityButton}>
+            {content[language].switchModel}: {currentLLM.toUpperCase()}
           </button>
           
           <button 
@@ -165,7 +186,15 @@ function CameraCoach() {
             disabled={isProcessing}
             style={isProcessing ? {...styles.captureButton, ...styles.disabledButton} : styles.captureButton}
           >
-            {isProcessing ? '...' : '拍摄并获取建议'}
+            {isProcessing ? '...' : content[language].getAdviceAndSave}
+          </button>
+
+          <button 
+            onClick={handleAnalyzeOnly}
+            disabled={isProcessing}
+            style={styles.secondaryButton}
+          >
+            {content[language].getAdviceOnly}
           </button>
         </div>
       </div>
@@ -175,28 +204,101 @@ function CameraCoach() {
 
 // --- 样式区 ---
 const styles = {
-  container: { position: 'relative', width: '100vw', height: '100vh', backgroundColor: '#000' },
-  webcam: { width: '100%', height: '100%', objectFit: 'cover' },
+  container: { 
+    position: 'relative', 
+    width: '100vw', 
+    height: '100vh', 
+    backgroundColor: '#000' 
+  },
+  webcam: { 
+    width: '100%', 
+    height: '100%', 
+    objectFit: 'cover' 
+  },
   overlayContainer: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'center', padding: '20px',
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0,
+    display: 'flex', 
+    flexDirection: 'column', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    padding: '20px',
+    pointerEvents: 'none',
   },
   feedbackBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)', borderRadius: '10px', padding: '10px 15px', maxWidth: '90%', marginTop: '20px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
+    borderRadius: '10px', 
+    padding: '10px 15px', 
+    maxWidth: '90%', 
+    marginTop: '20px', 
+    pointerEvents: 'auto',
   },
-  feedbackText: { color: 'white', fontSize: '16px', margin: 0, whiteSpace: 'pre-wrap' }, // whiteSpace用于保留换行
-  bottomControls: { display: 'flex', justifyContent: 'space-around', alignItems: 'center', width: '100%', maxWidth: '400px', paddingBottom: '30px' },
+  feedbackText: { 
+    color: 'white', 
+    fontSize: '16px', 
+    margin: 0, 
+    whiteSpace: 'pre-wrap' 
+  },
+  bottomControls: { 
+    display: 'flex', justifyContent: 'center', alignItems: 'center', 
+    flexWrap: 'wrap', // 允许换行
+    gap: '10px', // 按钮间距
+    width: '100%', maxWidth: '500px', paddingBottom: '20px', pointerEvents: 'auto',
+  },
   captureButton: {
     width: '100px', height: '100px', borderRadius: '50%', border: '4px solid white', 
     backgroundColor: 'rgba(255, 255, 255, 0.3)', cursor: 'pointer', fontSize: '16px', 
-    color: 'white', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', textAlign: 'center'
+    color: 'white', fontWeight: 'bold', display: 'flex', justifyContent: 'center', 
+    alignItems: 'center', textAlign: 'center', 
+    order: 3, // 主按钮放中间
+    flexShrink: 0, // 防止被压缩
   },
   disabledButton: { opacity: 0.6, cursor: 'not-allowed' },
-  // [新增] 切换按钮样式
-  toggleButton: {
+  utilityButton: { // 用于语言和模型切换按钮
     backgroundColor: '#007AFF', color: 'white', border: 'none',
+    borderRadius: '20px', padding: '10px 15px', fontSize: '12px',
+    cursor: 'pointer', fontWeight: 'bold',
+  },
+  secondaryButton: {
+    backgroundColor: 'rgba(128, 128, 128, 0.5)', color: 'white', border: '1px solid white',
     borderRadius: '20px', padding: '10px 15px', fontSize: '14px',
     cursor: 'pointer', fontWeight: 'bold',
+  },
+  floatingImageContainer: {
+    position: 'absolute',
+    top: '20px',
+    left: '20px',
+    width: '120px',
+    height: 'auto',
+    border: '2px solid white',
+    borderRadius: '8px',
+    boxShadow: '0 4px 8px rgba(0,0,0,0.5)',
+    overflow: 'hidden',
+    pointerEvents: 'auto',
+    zIndex: 10,
+  },
+  analyzedImagePreview: {
+    width: '100%',
+    height: '100%',
+    display: 'block',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: '0px',
+    right: '0px',
+    width: '24px',
+    height: '24px',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0 0 0 8px',
+    cursor: 'pointer',
+    fontSize: '16px',
+    lineHeight: '24px',
+    textAlign: 'center',
   }
 };
 
