@@ -80,7 +80,7 @@ function CameraCoach() {
   const [language, setLanguage] = useState('zh'); // 'en' 或 'zh', 默认为中文
   const [aiFeedback, setAiFeedback] = useState(content[language].initialFeedback);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [currentLLM, setCurrentLLM] = useState('gemini');
+  const [currentLLM, setCurrentLLM] = useState('ark');
   const [analyzedImage, setAnalyzedImage] = useState(null);
 
   // [新增] 切换语言的函数
