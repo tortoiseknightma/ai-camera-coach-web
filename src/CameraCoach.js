@@ -1,5 +1,5 @@
 // src/CameraCoach.js
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import OpenAI from 'openai'; // [新增] 导入OpenAI库
@@ -43,6 +43,10 @@ const ARK_API_KEY = '3b791088-c0b3-41da-a630-60a524702c4b'; // !! 替换成你�
 const ARK_MODEL_ID = 'doubao-seed-1-6-flash-250828'; // !! 替换成你的 Ark 模型 Endpoint ID
 const ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 
+const QWEN_API_KEY = 'sk-b2bc37c05e7843abb200904466bf9347';
+const QWEN_MODEL_ID = 'qwen3-omni-flash'; // 使用支持视觉的通用模型
+const QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+
 // --- SDK 初始化 ---
 const geminiAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const geminiModel = geminiAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
@@ -50,6 +54,12 @@ const geminiModel = geminiAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite'
 const arkClient = new OpenAI({
   apiKey: ARK_API_KEY,
   baseURL: ARK_BASE_URL,
+  dangerouslyAllowBrowser: true,
+});
+
+const qwenClient = new OpenAI({
+  apiKey: QWEN_API_KEY,
+  baseURL: QWEN_BASE_URL,
   dangerouslyAllowBrowser: true,
 });
 
@@ -73,24 +83,84 @@ const saveImageToLocal = (imageSrc) => {
   document.body.removeChild(link);
 };
 
+// 定义模型列表，方便切换
+const models = ['gemini', 'ark', 'qwen'];
 
 function CameraCoach() {
   const webcamRef = useRef(null);
-  // [修改] 增加语言 state
-  const [language, setLanguage] = useState('zh'); // 'en' 或 'zh', 默认为中文
+  const [language, setLanguage] = useState('zh');
   const [aiFeedback, setAiFeedback] = useState(content[language].initialFeedback);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [currentLLM, setCurrentLLM] = useState('ark');
+  const [currentLLM, setCurrentLLM] = useState('gemini');
   const [analyzedImage, setAnalyzedImage] = useState(null);
 
-  // [新增] 切换语言的函数
+  const [zoom, setZoom] = useState(1);
+  const [zoomSupport, setZoomSupport] = useState({
+    isSupported: false,
+    min: 1,
+    max: 1,
+    step: 0.1,
+  });
+
+  useEffect(() => {
+    const checkZoomCapabilities = async () => {
+      if (webcamRef.current && webcamRef.current.video && webcamRef.current.video.srcObject) {
+        const stream = webcamRef.current.video.srcObject;
+        const videoTrack = stream.getVideoTracks()[0];
+        
+        if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
+          try {
+            const capabilities = videoTrack.getCapabilities();
+            if (capabilities.zoom) {
+              console.log('Zoom is supported!');
+              setZoomSupport({
+                isSupported: true,
+                min: capabilities.zoom.min,
+                max: capabilities.zoom.max,
+                step: capabilities.zoom.step,
+              });
+              setZoom(capabilities.zoom.min);
+            } else {
+              console.log('Zoom is not supported by this camera.');
+            }
+          } catch (error) {
+            console.error('Error getting capabilities:', error);
+          }
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(checkZoomCapabilities, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  const handleZoomChange = async (event) => {
+    const newZoomValue = parseFloat(event.target.value);
+    setZoom(newZoomValue);
+
+    if (webcamRef.current && webcamRef.current.video && webcamRef.current.video.srcObject) {
+      const stream = webcamRef.current.video.srcObject;
+      const videoTrack = stream.getVideoTracks()[0];
+      try {
+        await videoTrack.applyConstraints({
+          advanced: [{ zoom: newZoomValue }]
+        });
+      } catch (error) {
+        console.error('Failed to apply zoom constraints:', error);
+      }
+    }
+  };
+
   const toggleLanguage = () => {
     setLanguage(prevLang => (prevLang === 'en' ? 'zh' : 'en'));
   };
 
   const toggleLLM = () => {
     setCurrentLLM(prevLLM => {
-      const newLLM = prevLLM === 'gemini' ? 'ark' : 'gemini';
+      const currentIndex = models.indexOf(prevLLM);
+      const nextIndex = (currentIndex + 1) % models.length;
+      const newLLM = models[nextIndex];
       setAiFeedback(`模型已切换至 ${newLLM.toUpperCase()}。`);
       return newLLM;
     });
@@ -99,24 +169,40 @@ function CameraCoach() {
   const getAiFeedback = async (imageSrc) => {
     setAnalyzedImage(imageSrc);
     setIsProcessing(true);
-    setAiFeedback(`${content[language].processing} (${currentLLM.toUpperCase()})`);
+    setAiFeedback(''); 
 
     try {
       let responseText = '';
-      const currentPrompt = content[language].prompt; // 根据当前语言选择 prompt
+      const currentPrompt = content[language].prompt;
 
       if (currentLLM === 'gemini') {
         const imagePart = fileToGenerativePart(imageSrc, "image/jpeg");
         const result = await geminiModel.generateContent([currentPrompt, imagePart]);
         responseText = result.response.text();
+        setAiFeedback(responseText);
+
       } else if (currentLLM === 'ark') {
         const response = await arkClient.chat.completions.create({
           model: ARK_MODEL_ID,
           messages: [{ role: 'user', content: [{ type: 'text', text: currentPrompt }, { type: 'image_url', image_url: { url: imageSrc } }] }],
         });
         responseText = response.choices[0].message.content;
+        setAiFeedback(responseText);
+
+      } else if (currentLLM === 'qwen') {
+        const stream = await qwenClient.chat.completions.create({
+          model: QWEN_MODEL_ID,
+          messages: [{ role: 'user', content: [{ type: 'text', text: currentPrompt }, { type: 'image_url', image_url: { url: imageSrc } }] }],
+          stream: true,
+        });
+
+        for await (const chunk of stream) {
+          const textChunk = chunk.choices[0]?.delta?.content || "";
+          if (textChunk) {
+            setAiFeedback(prevFeedback => prevFeedback + textChunk);
+          }
+        }
       }
-      setAiFeedback(responseText);
     } catch (error) {
       console.error(`Error with ${currentLLM.toUpperCase()} API:`, error);
       setAiFeedback(content[language].feedbackError(currentLLM.toUpperCase()));
@@ -130,7 +216,7 @@ function CameraCoach() {
     if (isProcessing) return;
     const imageSrc = webcamRef.current.getScreenshot();
     if (!imageSrc) {
-      setAiFeedback('无法捕获图像，请重试。');
+      setAiFeedback(content[language].captureError);
       return;
     }
     saveImageToLocal(imageSrc);
@@ -141,7 +227,7 @@ function CameraCoach() {
     if (isProcessing) return;
     const imageSrc = webcamRef.current.getScreenshot();
     if (!imageSrc) {
-      setAiFeedback('无法捕获图像，请重试。');
+      setAiFeedback(content[language].captureError);
       return;
     }
     getAiFeedback(imageSrc);
@@ -157,6 +243,21 @@ function CameraCoach() {
         style={styles.webcam}
         videoConstraints={{ facingMode: "environment" }} 
       />
+
+      {zoomSupport.isSupported && (
+        <div style={styles.zoomControls}>
+          <input
+            type="range"
+            min={zoomSupport.min}
+            max={zoomSupport.max}
+            step={zoomSupport.step}
+            value={zoom}
+            onChange={handleZoomChange}
+            style={styles.zoomSlider}
+          />
+        </div>
+      )}
+      
       <div style={styles.overlayContainer}>
         <div style={styles.feedbackBox}>
           <p style={styles.feedbackText}>{aiFeedback}</p>
@@ -171,7 +272,6 @@ function CameraCoach() {
           </div>
         )}
 
-        {/* [修改] 底部按钮区的文本现在是动态的 */}
         <div style={styles.bottomControls}>
           <button onClick={toggleLanguage} style={styles.utilityButton}>
             {content[language].switchLanguage}
@@ -243,29 +343,56 @@ const styles = {
     whiteSpace: 'pre-wrap' 
   },
   bottomControls: { 
-    display: 'flex', justifyContent: 'center', alignItems: 'center', 
-    flexWrap: 'wrap', // 允许换行
-    gap: '10px', // 按钮间距
-    width: '100%', maxWidth: '500px', paddingBottom: '20px', pointerEvents: 'auto',
+    display: 'flex', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    flexWrap: 'wrap',
+    gap: '10px',
+    width: '100%', 
+    maxWidth: '500px', 
+    paddingBottom: '20px', 
+    pointerEvents: 'auto',
   },
   captureButton: {
-    width: '100px', height: '100px', borderRadius: '50%', border: '4px solid white', 
-    backgroundColor: 'rgba(255, 255, 255, 0.3)', cursor: 'pointer', fontSize: '16px', 
-    color: 'white', fontWeight: 'bold', display: 'flex', justifyContent: 'center', 
-    alignItems: 'center', textAlign: 'center', 
-    order: 3, // 主按钮放中间
-    flexShrink: 0, // 防止被压缩
+    width: '100px', 
+    height: '100px', 
+    borderRadius: '50%', 
+    border: '4px solid white', 
+    backgroundColor: 'rgba(255, 255, 255, 0.3)', 
+    cursor: 'pointer', 
+    fontSize: '16px', 
+    color: 'white', 
+    fontWeight: 'bold', 
+    display: 'flex', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    textAlign: 'center', 
+    order: 3,
+    flexShrink: 0,
   },
-  disabledButton: { opacity: 0.6, cursor: 'not-allowed' },
-  utilityButton: { // 用于语言和模型切换按钮
-    backgroundColor: '#007AFF', color: 'white', border: 'none',
-    borderRadius: '20px', padding: '10px 15px', fontSize: '12px',
-    cursor: 'pointer', fontWeight: 'bold',
+  disabledButton: { 
+    opacity: 0.6, 
+    cursor: 'not-allowed' 
+  },
+  utilityButton: {
+    backgroundColor: '#007AFF', 
+    color: 'white', 
+    border: 'none',
+    borderRadius: '20px', 
+    padding: '10px 15px', 
+    fontSize: '12px',
+    cursor: 'pointer', 
+    fontWeight: 'bold',
   },
   secondaryButton: {
-    backgroundColor: 'rgba(128, 128, 128, 0.5)', color: 'white', border: '1px solid white',
-    borderRadius: '20px', padding: '10px 15px', fontSize: '14px',
-    cursor: 'pointer', fontWeight: 'bold',
+    backgroundColor: 'rgba(128, 128, 128, 0.5)', 
+    color: 'white', 
+    border: '1px solid white',
+    borderRadius: '20px', 
+    padding: '10px 15px', 
+    fontSize: '14px',
+    cursor: 'pointer', 
+    fontWeight: 'bold',
   },
   floatingImageContainer: {
     position: 'absolute',
@@ -299,6 +426,27 @@ const styles = {
     fontSize: '16px',
     lineHeight: '24px',
     textAlign: 'center',
+  },
+  zoomControls: {
+    position: 'absolute',
+    right: '15px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: '20px',
+    padding: '10px 5px',
+    zIndex: 10,
+    pointerEvents: 'auto',
+  },
+  zoomSlider: {
+    writingMode: 'vertical-lr',
+    direction: 'rtl',
+    width: '8px',
+    height: '150px',
+    cursor: 'pointer',
   }
 };
 
